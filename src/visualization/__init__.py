@@ -1,0 +1,2 @@
+"""Visual quality-control rendering."""
+
