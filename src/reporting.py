@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from statistics import mean, median
@@ -42,6 +43,43 @@ def build_summary(config_path: str | Path) -> dict[str, Any]:
     counterfactual_scores_values = [float(candidate["counterfactual_score"]) for sample in samples for candidate in sample["candidates"] if candidate.get("counterfactual_score") is not None]
     token_counts: Counter[int] = Counter(label for sample in samples for label in sample["token_labels"])
     total_tokens = sum(token_counts.values())
+    soft_mass = [0.0, 0.0, 0.0]
+    soft_target_tokens = 0
+    for sample in samples:
+        for soft_target in sample.get("token_soft_targets", []):
+            if len(soft_target) == 3:
+                for class_index, value in enumerate(soft_target):
+                    soft_mass[class_index] += float(value)
+                soft_target_tokens += 1
+    total_soft_mass = sum(soft_mass)
+    inverse_frequency_weights = [
+        (total_soft_mass / (len(soft_mass) * value)) if value > 0.0 else 0.0
+        for value in soft_mass
+    ] if total_soft_mass else [0.0, 0.0, 0.0]
+    soft_proportions = [value / total_soft_mass if total_soft_mass else 0.0 for value in soft_mass]
+    sqrt_inverse_weights = [1.0 / math.sqrt(value) if value > 0.0 else 0.0 for value in soft_proportions]
+    expected_weight = sum(proportion * weight for proportion, weight in zip(soft_proportions, sqrt_inverse_weights))
+    suggested_weights = [weight / expected_weight if expected_weight else 0.0 for weight in sqrt_inverse_weights]
+    positive_samples = sum(any(label in (1, 2) for label in sample["token_labels"]) for sample in samples)
+    detail_selected_samples = sum(any(bool(candidate.get("is_detail")) for candidate in sample["candidates"]) for sample in samples)
+    detail_labeled_samples = sum(2 in sample["token_labels"] for sample in samples)
+    subject_fallback_samples = sum(
+        bool(sample.get("token_label_assignment", {}).get("subject_positive_fallback")) for sample in samples
+    )
+    detail_fallback_count = sum(
+        int(sample.get("token_label_assignment", {}).get("detail_positive_fallback_count", 0)) for sample in samples
+    )
+    source_label_quality: dict[str, dict[str, int]] = {}
+    for source in sorted(source_counts):
+        source_samples = [sample for sample in samples if sample["source"] == source]
+        source_label_quality[source] = {
+            "samples": len(source_samples),
+            "samples_with_positive": sum(any(label in (1, 2) for label in sample["token_labels"]) for sample in source_samples),
+            "samples_with_detail": sum(2 in sample["token_labels"] for sample in source_samples),
+            "samples_with_selected_detail": sum(
+                any(bool(candidate.get("is_detail")) for candidate in sample["candidates"]) for sample in source_samples
+            ),
+        }
     mapping_ok = sum(
         len(sample["token_labels"]) == int(sample["visual_token_count"])
         and len(sample["token_confidence"]) == int(sample["visual_token_count"])
@@ -75,6 +113,29 @@ def build_summary(config_path: str | Path) -> dict[str, Any]:
         "counterfactual_score": _distribution(counterfactual_scores_values),
         "token_counts": {str(label): token_counts.get(label, 0) for label in (-1, 0, 1, 2)},
         "token_proportions": {str(label): token_counts.get(label, 0) / total_tokens if total_tokens else 0.0 for label in (-1, 0, 1, 2)},
+        "samples_with_positive_token": positive_samples,
+        "samples_without_positive_token": len(samples) - positive_samples,
+        "samples_with_selected_detail": detail_selected_samples,
+        "samples_with_detail_token": detail_labeled_samples,
+        "selected_detail_without_detail_token": sum(
+            any(bool(candidate.get("is_detail")) for candidate in sample["candidates"]) and 2 not in sample["token_labels"]
+            for sample in samples
+        ),
+        "subject_positive_fallback_samples": subject_fallback_samples,
+        "detail_positive_fallback_count": detail_fallback_count,
+        "source_label_quality": source_label_quality,
+        "soft_target_class_order": ["background", "foreground", "detail"],
+        "soft_target_token_count": soft_target_tokens,
+        "soft_target_mass": {name: value for name, value in zip(("background", "foreground", "detail"), soft_mass)},
+        "soft_target_proportions": {
+            name: value for name, value in zip(("background", "foreground", "detail"), soft_proportions)
+        },
+        "inverse_frequency_soft_loss_class_weights": {
+            name: value for name, value in zip(("background", "foreground", "detail"), inverse_frequency_weights)
+        },
+        "suggested_soft_loss_class_weights": {
+            name: value for name, value in zip(("background", "foreground", "detail"), suggested_weights)
+        },
         "total_visual_tokens": total_tokens,
         "token_mapping_length_checks_passed": mapping_ok,
         "token_mapping_length_checks_failed": len(samples) - mapping_ok,

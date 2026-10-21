@@ -1,0 +1,105 @@
+project:
+  name: hierarchical-vis-pruning
+  seed: 42
+  sample_count: 200
+
+paths:
+  # Reuse only the expensive, frozen SAM/Qwen result from v1. The v2 dataset,
+  # report, and visualizations are written to a separate directory.
+  token_source_jsonl: outputs/pilot_200/teacher_scores.jsonl
+  gaze_root: /home/ruimeng/gaze
+  training_manifest: /home/bbhan/gaze/viscot_mix_20k_30-15-15-10-5-5-5-5-5_seed42.jsonl
+  image_root: /data/DataSet/vlm_dataset/cot_image_data
+  qwen_checkpoint: /data/ModelZoo/LVLM/Qwen-Qwen2.5-VL-7B-Instruct
+  sam_checkpoint: /data/ModelZoo/CV/SAM/sam_vit_h_4b8939.pth
+  output_dir: outputs/pilot_200_v2
+
+data:
+  required_split: train
+  image_prefix_to_strip: cot/
+  short_answer_suffix: "\nAnswer the question using a single word or phrase."
+  desired_sources:
+    - gqa
+    - docvqa
+    - textvqa
+    - vsr
+    - v7w
+    - dude
+    - sroie
+    - flickr30k
+    - infographicsvqa
+
+sam:
+  model_type: vit_h
+  device: cuda:0
+  subject_crop_padding: 0.15
+  point_prompt_count: 24
+  masks_per_point: 3
+  min_pred_iou: 0.85
+  min_stability: 0.90
+  stability_offset: 1.0
+  min_inside_ratio: 0.85
+  min_area_ratio: 0.005
+  max_area_ratio: 0.60
+  duplicate_iou: 0.85
+  duplicate_area_similarity: 0.80
+  max_filtered_candidates: 12
+  max_connected_components: 8
+  min_component_fraction: 0.02
+  border_touch_penalty: 0.05
+  subject_min_bbox_coverage: 0.05
+  subject_max_image_area: 0.95
+  subject_min_image_area: 0.00002
+
+qwen:
+  device: cuda:1
+  dtype: bfloat16
+  attention_implementation: sdpa
+  min_pixels: 3136
+  max_pixels: 401408
+  patch_size: 14
+  spatial_merge_size: 2
+  answer_include_im_end: false
+  counterfactual_batch_size: 5
+  counterfactual_mask_threshold: 0.05
+  background_token_max_subject_coverage: 0.05
+
+teacher_score:
+  semantic_top_k: 5
+  question_weight: 0.25
+  answer_weight: 0.35
+  question_answer_weight: 0.40
+  semantic_weight: 0.35
+  counterfactual_weight: 0.45
+  sam_quality_weight: 0.15
+  area_penalty_weight: 0.05
+  max_detail_masks: 3
+  detail_min_utility: 0.55
+  detail_diversity_iou: 0.60
+  nested_area_ratio_threshold: 0.55
+
+token_labels:
+  detail_label: 2
+  foreground_label: 1
+  background_label: 0
+  ignore_label: -1
+  # Hard labels are compatibility/QC labels. Training should consume the
+  # continuous token_soft_targets emitted in [background, foreground, detail]
+  # order. These thresholds leave only genuinely weak evidence as ignore.
+  detail_min_coverage: 0.20
+  foreground_min_coverage: 0.10
+  background_max_subject_coverage: 0.01
+  ensure_subject_positive: true
+  ensure_each_detail_positive: true
+  require_soft_targets: true
+
+visualization:
+  render_all: true
+  overview_count: 50
+  dpi: 120
+
+runtime:
+  resume: true
+  fail_fast: false
+  deterministic_algorithms: false
+  log_every: 1

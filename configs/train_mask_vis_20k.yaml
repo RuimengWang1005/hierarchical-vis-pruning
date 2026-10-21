@@ -1,0 +1,52 @@
+project:
+  name: mask-vis-20k-online
+  seed: 42
+
+paths:
+  manifest_20k: /home/ruimeng/hierarchical-vis-pruning/outputs/mask_gaze_20k/manifest_20k.jsonl
+  subject_masks_20k: /home/ruimeng/hierarchical-vis-pruning/outputs/mask_gaze_20k/subject_masks.jsonl
+  token_supervision_20k: /home/ruimeng/hierarchical-vis-pruning/outputs/mask_gaze_20k/token_supervision_qwen25vl.jsonl
+  failures_20k: /home/ruimeng/hierarchical-vis-pruning/outputs/mask_gaze_20k/failures.jsonl
+  valid_training_manifest: /home/ruimeng/hierarchical-vis-pruning/outputs/mask_gaze_20k/training_ready/valid_training_manifest.jsonl
+  pilot_manifest: /home/ruimeng/hierarchical-vis-pruning/outputs/pilot_200/manifest.jsonl
+  pilot_token_audit: /home/ruimeng/hierarchical-vis-pruning/outputs/pilot_200/zero_step_audit/per_sample.jsonl
+  gaze_checkpoint: /home/ruimeng/gaze/output_ckpt666/VisionSelector-Qwen2.5-VL-7B
+  gaze_eval_root: /home/ruimeng/gaze/qwen-evaluation1
+  training_output_dir: /home/ruimeng/hierarchical-vis-pruning/outputs/mask_vis_20k_online
+  dry_run_output_dir: /home/ruimeng/hierarchical-vis-pruning/outputs/mask_vis_20k_dry_run
+
+initialization:
+  mode: original_random
+  seed: 42
+  verified_pre_bbox_scorer: null
+  note: No verified pre-BBox scorer was found; never use the post-BBox GAZE scorer as training initialization.
+
+qwen:
+  attention_implementation: sdpa
+  min_pixels: 3136
+  max_pixels: 401408
+  patch_size: 14
+  spatial_merge_size: 2
+  vision_dtype: bfloat16
+
+training:
+  epochs: 1
+  batch_size: 1
+  gradient_accumulation_steps: 32
+  learning_rate: 0.00005
+  margin: 0.2
+  optimizer: AdamW
+  weight_decay: 0.0
+  warmup_ratio: 0.03
+  scheduler: cosine
+  max_grad_norm: 1.0
+  pair_chunk_size: 256
+  num_workers: 2
+
+selection:
+  budgets: [0.10, 0.20, 0.30]
+  spatial_ratio: 0.1
+  cosine_penalty_weight: 1.0
+  cosine_penalty_threshold: 0.7
+  focal_selection_strategy: original
+

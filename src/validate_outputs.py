@@ -23,6 +23,7 @@ def validate_outputs(config_path: str | Path) -> dict[str, Any]:
         errors.append("sample_id values are not unique")
 
     label_counts: Counter[int] = Counter()
+    require_soft_targets = bool(config["token_labels"].get("require_soft_targets", False))
     for record in records:
         sample_id = record["sample_id"]
         token_count = int(record["visual_token_count"])
@@ -34,6 +35,32 @@ def validate_outputs(config_path: str | Path) -> dict[str, Any]:
             errors.append(f"{sample_id}: unexpected token label")
         if any(not 0.0 <= float(value) <= 1.0 for value in confidence):
             errors.append(f"{sample_id}: confidence outside [0, 1]")
+        soft_targets = record.get("token_soft_targets")
+        if require_soft_targets and soft_targets is None:
+            errors.append(f"{sample_id}: missing token_soft_targets")
+        if soft_targets is not None:
+            if len(soft_targets) != token_count:
+                errors.append(f"{sample_id}: soft-target length mismatch")
+            for token_index, target in enumerate(soft_targets):
+                if len(target) != 3:
+                    errors.append(f"{sample_id}: soft target {token_index} is not length 3")
+                    break
+                values = [float(value) for value in target]
+                if any(value < 0.0 or value > 1.0 for value in values) or abs(sum(values) - 1.0) > 1e-5:
+                    errors.append(f"{sample_id}: invalid soft target {token_index}")
+                    break
+            if record.get("token_soft_target_class_order") != ["background", "foreground", "detail"]:
+                errors.append(f"{sample_id}: unexpected soft-target class order")
+        if require_soft_targets and not any(label in (1, 2) for label in labels):
+            errors.append(f"{sample_id}: no positive hard token")
+        selected_details = sum(bool(candidate.get("is_detail")) for candidate in record["candidates"])
+        if require_soft_targets and selected_details and 2 not in labels:
+            errors.append(f"{sample_id}: selected detail masks but no detail hard token")
+        detail_positive_indices = record.get("token_label_assignment", {}).get("detail_mask_positive_indices", [])
+        if require_soft_targets and len(detail_positive_indices) != selected_details:
+            errors.append(f"{sample_id}: not every selected detail mask has a positive token")
+        if any(index < 0 or index >= token_count or labels[index] != 2 for index in detail_positive_indices):
+            errors.append(f"{sample_id}: invalid detail-mask positive-token index")
         label_counts.update(labels)
         candidates = record["candidates"]
         if len(candidates) > int(config["sam"]["max_filtered_candidates"]):
@@ -53,7 +80,10 @@ def validate_outputs(config_path: str | Path) -> dict[str, Any]:
     visualizations = list((output_dir / "visualizations").glob("*.png"))
     if len(visualizations) != len(records):
         errors.append(f"visualization count {len(visualizations)} != dataset count {len(records)}")
-    for required in ("manifest.jsonl", "dataset.jsonl", "failures.jsonl", "summary.json", "summary.csv", "visualizations/overview.html"):
+    required_outputs = ["dataset.jsonl", "summary.json", "summary.csv", "visualizations/overview.html"]
+    if "token_source_jsonl" not in config["paths"]:
+        required_outputs.extend(("manifest.jsonl", "failures.jsonl"))
+    for required in required_outputs:
         if not (output_dir / required).exists():
             errors.append(f"missing required output: {required}")
 

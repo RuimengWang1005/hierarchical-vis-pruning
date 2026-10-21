@@ -1,0 +1,10 @@
+task: docvqa_val_local
+dataset_path: /home/ruimeng/.cache/huggingface/hub/datasets--lmms-lab--DocVQA/snapshots/539088ef8a8ada01ac8e2e6d4e372586748a265e/DocVQA
+dataset_name: null
+dataset_kwargs: {}
+test_split: validation
+metric_list:
+  - metric: anls
+    aggregation: mean
+    higher_is_better: true
+include: /home/ruimeng/VisionSelector/lmms-eval/lmms_eval/tasks/docvqa/_default_template_docvqa_yaml

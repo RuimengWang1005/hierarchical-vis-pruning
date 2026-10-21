@@ -1,0 +1,63 @@
+project:
+  name: mask-gaze-20k-offline-data
+  seed: 42
+  sample_count: 20000
+
+paths:
+  base_training_manifest: /home/bbhan/gaze/viscot_mix_20k_30-15-15-10-5-5-5-5-5_seed42.jsonl
+  candidate_training_manifest: /home/bbhan/gaze/viscot_mix_25k_seed42_keep20k_plus5k.jsonl
+  image_root: /data/DataSet/vlm_dataset/cot_image_data
+  qwen_checkpoint: /data/ModelZoo/LVLM/Qwen-Qwen2.5-VL-7B-Instruct
+  sam_checkpoint: /data/ModelZoo/CV/SAM/sam_vit_h_4b8939.pth
+  pilot_manifest: outputs/pilot_200/manifest.jsonl
+  reuse_1k_manifest: outputs/mask_gaze_1k/manifest_1k.jsonl
+  reuse_1k_masks: outputs/mask_gaze_1k/subject_masks.jsonl
+  reuse_1k_tokens: outputs/mask_gaze_1k/token_supervision_qwen25vl.jsonl
+  output_dir: outputs/mask_gaze_20k
+
+data:
+  required_split: train
+  image_prefix_to_strip: "cot/"
+  short_answer_suffix: "\nAnswer the question using a single word or phrase."
+  exclude_pilot_sample_ids: true
+  exclude_pilot_images: true
+  unique_image_paths: true
+  preserve_existing_1k: true
+  quota_policy: original_20k_proportions_with_capacity_caps_and_deterministic_redistribution
+
+sam:
+  model_type: vit_h
+  device: cuda:0
+  stability_offset: 1.0
+  subject_min_bbox_coverage: 0.05
+  subject_max_image_area: 0.95
+  subject_min_image_area: 0.00002
+
+qwen:
+  device: cpu
+  min_pixels: 3136
+  max_pixels: 401408
+  patch_size: 14
+  spatial_merge_size: 2
+  use_fast: false
+
+supervision:
+  adaptive_mass_target: 0.90
+  reliable_background_max_coverage: 0.01
+  foreground_label: 1
+  background_label: 0
+  ignore_label: -1
+
+dry_run:
+  reused_1k_count: 10
+  new_sample_count: 10
+
+runtime:
+  shard_size: 500
+  state_every: 10
+  log_every: 25
+  deterministic_algorithms: false
+
+visualization:
+  count: 100
+  dpi: 100

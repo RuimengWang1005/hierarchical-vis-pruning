@@ -10,6 +10,8 @@ __pycache__/
 outputs/
 cache/
 data/
+!vendor/gaze/qwen-vl-finetune/qwenvl/data/
+!vendor/gaze/qwen-vl-finetune/qwenvl/data/**
 checkpoints/
 *.pt
 *.pth

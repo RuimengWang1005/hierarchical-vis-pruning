@@ -85,7 +85,16 @@ def render_sample(sample: dict[str, Any], output_path: Path, config: dict[str, A
     label_rgb = np.asarray(Image.fromarray((label_rgb * 255).astype(np.uint8)).resize((image.shape[1], image.shape[0]), Image.Resampling.NEAREST)) / 255.0
     token_view = 0.45 * (image.astype(np.float32) / 255.0) + 0.55 * label_rgb
     axes[1, 1].imshow(np.clip(token_view, 0, 1))
-    axes[1, 1].set_title(f"Token grid {grid_h}x{grid_w}: red=detail green=foreground blue=background orange=ignore")
+    counts = {label: int((labels == label).sum()) for label in COLORS}
+    fallback = sample.get("token_label_assignment", {})
+    axes[1, 1].set_title(
+        f"Hard token grid {grid_h}x{grid_w}\n"
+        "red=detail green=foreground blue=background orange=ignore\n"
+        f"detail={counts[2]} foreground={counts[1]} ignore={counts[-1]} | "
+        f"fallback subject={bool(fallback.get('subject_positive_fallback'))} "
+        f"detail={int(fallback.get('detail_positive_fallback_count', 0))}",
+        fontsize=9,
+    )
 
     cf_mask = np.zeros(image.shape[:2], dtype=bool)
     for candidate in candidates:

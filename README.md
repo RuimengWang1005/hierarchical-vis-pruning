@@ -7,6 +7,11 @@ This repository generates deterministic four-way Qwen visual-token labels:
 - `0`: background
 - `-1`: uncertain boundary or label conflict
 
+The recommended v2 output also stores a three-class soft target for every
+visual token. Its fixed class order is `[background, foreground, detail]`, and
+the three entries sum to one. Hard labels remain useful for review and for
+legacy consumers, but training should prefer `token_soft_targets`.
+
 It is an independent Git project. `/home/ruimeng/gaze` and `/home/bbhan/gaze` are read-only inputs; no file in either GAZE tree is modified or imported at runtime.
 
 ## Recovered GAZE inputs
@@ -79,6 +84,16 @@ STAGE=report bash scripts/run_pilot_200.sh
 STAGE=validate bash scripts/run_pilot_200.sh
 ```
 
+To regenerate the v2 token supervision from the frozen v1 SAM/Qwen scores
+without rerunning either model:
+
+```bash
+CONFIG=configs/pilot_200_v2.yaml STAGE=tokens bash scripts/run_pilot_200.sh --overwrite
+CONFIG=configs/pilot_200_v2.yaml STAGE=visualize bash scripts/run_pilot_200.sh --overwrite
+CONFIG=configs/pilot_200_v2.yaml STAGE=report bash scripts/run_pilot_200.sh
+CONFIG=configs/pilot_200_v2.yaml STAGE=validate bash scripts/run_pilot_200.sh
+```
+
 The major stages are:
 
 1. Audit exact data/model/checkpoint availability and versions.
@@ -132,6 +147,36 @@ The code does not assume a fixed grid. Unit tests cover exact cell coverage,
 dynamic grid sizes, four labels, RLE round trips, deduplication, and preservation
 of nested candidates.
 
+## V2 supervision
+
+For subject coverage `s` and selected-detail coverage `d`, v2 clips detail to
+the subject (`d = min(d, s)`) and writes this loss-ready target:
+
+```text
+background = 1 - s
+foreground = s - d
+detail = d
+```
+
+Partial text/object coverage therefore supplies a proportional gradient rather
+than disappearing behind an ignore label. Hard-label thresholds are 0.01 for
+background, 0.10 for foreground, and 0.20 for detail. A deterministic argmax
+fallback guarantees at least one positive token for every non-empty subject
+and at least one detail token for every selected detail mask. The aggregate
+report includes class mass, raw inverse-frequency weights, more conservative
+square-root-inverse suggested weights, per-source positive/detail coverage, and
+fallback counts.
+
+For a three-logit VIS head, the intended loss is weighted soft cross-entropy:
+
+```text
+loss = mean(-sum_c class_weight[c] * token_soft_targets[c] * log_softmax(logits)[c])
+```
+
+Use `suggested_soft_loss_class_weights` from `summary.json` as the initial
+weights. Do not apply the hard-label `-1` ignore mask to this soft loss; the
+hard labels and orange cells are only the compatibility/QC view in v2.
+
 ## Known limits
 
 - The pilot uses feature-level counterfactual replacement, which is less
@@ -143,4 +188,42 @@ of nested candidates.
   conclusions.
 - The optional 160/40 VIS training smoke test is intentionally deferred until
   the 200 labels pass human review; this repository makes no benchmark claim.
+
+## Mask-GAZE 1K binary-ranking pre-experiment
+
+The Mask-GAZE experiment is independent of the three-level pilot. It trains
+only the existing VIS importance scorer; the Qwen vision encoder is run once
+under inference mode to build a frozen feature cache, and the language model is
+not loaded during training.
+
+```bash
+# Strict correspondence/RLE/grid/coverage gate plus 60 review images.
+PYTHONPATH=. .venv/bin/python -m src.mask_gaze_preexperiment
+
+# Frozen Qwen post-merger feature cache (requires a GPU).
+PYTHONPATH=. .venv/bin/python -m src.train_mask_gaze_preexperiment features --device cuda:0
+
+# Three epochs for paired BBox/Mask scorers and unchanged GAZE selection eval.
+PYTHONPATH=. .venv/bin/python -m src.train_mask_gaze_preexperiment train-eval --device cuda:0
+
+# Paired bootstrap analysis and A/B/C case visualizations.
+PYTHONPATH=. .venv/bin/python -m src.report_mask_gaze_preexperiment
+```
+
+Group B deliberately reconstructs the original GAZE target: each pixel BBox
+is directly projected to the post-spatial-merge grid and filled as an inclusive
+binary rectangle. It does not consume the adaptive 90%-mass BBox diagnostic in
+the offline JSONL. Group C uses label `1` for adaptive SAM subject tokens,
+label `0` for reliable background, and excludes label `-1` from every ranking
+pair. Both groups use the original full-pair softplus margin-ranking form and
+margin 0.2.
+
+The experiment artifacts live under `outputs/mask_gaze_1k/preexperiment/`:
+
+- `acceptance/acceptance_report.md` and `acceptance_summary.json`
+- `acceptance/accepted_supervision.jsonl`, including original-GAZE BBox labels
+- `training/{bbox,mask}/epoch_{1,2,3}.safetensors`
+- `token_evaluation/*_summary.json` and `*_per_sample.jsonl`
+- `analysis_summary.json`, `abc_token_results.csv`, and visualization overviews
+- `fgvc_evaluation/` and `downstream_evaluation/` for full downstream runs
 
